@@ -1,0 +1,37 @@
+name: Build app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Display Buddy.app
+        env:
+          VERSION: 0.1.${{ github.run_number }}
+          BUILD: ${{ github.run_number }}
+        run: ./scripts/build-app.sh
+
+      - name: Keep a copy on this build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DisplayBuddy
+          path: build/DisplayBuddy.zip
+
+      - name: Publish as the "latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest build/DisplayBuddy.zip \
+            --title "Display Buddy 0.1.${{ github.run_number }}" \
+            --notes "Download DisplayBuddy.zip below, then follow INSTALL.md." \
+            --target "${{ github.sha }}"
