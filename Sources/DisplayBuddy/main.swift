@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             manager.step(by: up ? step : -step)
             OSD.shared.show(brightness: manager.brightness, kelvin: manager.currentKelvin)
         }
+        Hotkeys.shared.start()
         if !KeyboardTap.shared.start() {
             KeyboardTap.shared.requestPermission()
             waitForAccessibility()

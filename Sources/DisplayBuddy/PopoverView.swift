@@ -6,11 +6,13 @@ struct PopoverView: View {
     @ObservedObject var prefs = AppPrefs.shared
     @State private var keysActive = KeyboardTap.shared.isTrusted
     @State private var showMonitors = true
+    @State private var hotkeysOn = Hotkeys.shared.isEnabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             masterCard
+            presetsRow
             if !manager.monitors.isEmpty { monitorsCard }
             colorCard
             footer
@@ -37,7 +39,7 @@ struct PopoverView: View {
 
     private var subtitle: String {
         let n = manager.monitors.count
-        return n == 0 ? "No external monitors found" : "\(n) monitor\(n == 1 ? "" : "s") in sync"
+        return n == 0 ? "No external monitors found" : manager.profileName
     }
 
     private var masterCard: some View {
@@ -56,11 +58,37 @@ struct PopoverView: View {
                     .tint(manager.brightness < 0 ? .indigo : .orange)
                 Image(systemName: "sun.max.fill").foregroundStyle(.orange)
             }
+            Toggle(isOn: $manager.adaptiveBrightness) {
+                Text("Follow the sun").font(.system(size: 12))
+                Text(manager.adaptiveBrightness
+                    ? "Day \(Int(manager.dayBrightness)) · Night \(Int(manager.nightBrightness)). Learns from your changes."
+                    : "Brighter by day, dimmer at night")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            .toggleStyle(.switch).controlSize(.mini)
             Toggle(isOn: $manager.subZeroEnabled) {
                 Text("Sub-zero dimming").font(.system(size: 12))
                 Text("Go darker than the monitor allows").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             .toggleStyle(.switch).controlSize(.mini)
+        }
+    }
+
+    private var presetsRow: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(Preset.allCases.enumerated()), id: \.element) { index, preset in
+                Button { manager.apply(preset: preset) } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: preset.icon).font(.system(size: 15))
+                        Text(preset.title).font(.system(size: 10, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("\(preset.title) preset (⌃⌥\(index + 1))")
+            }
         }
     }
 
@@ -127,6 +155,16 @@ struct PopoverView: View {
                 }
                 .buttonStyle(.borderedProminent).tint(.orange)
             }
+            Toggle(isOn: $hotkeysOn) {
+                Text("Keyboard shortcuts").font(.system(size: 11))
+            }
+            .toggleStyle(.checkbox)
+            .help("⌃⌥↑ ↓ brightness · ⌃⌥← → warmer / cooler · ⌃⌥1–4 presets")
+            .onChange(of: hotkeysOn) { Hotkeys.shared.isEnabled = $0 }
+            if hotkeysOn {
+                Text("⌃⌥↑↓ brightness · ⌃⌥←→ warmth · ⌃⌥1–4 presets")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
             HStack {
                 Toggle("Dock icon", isOn: $prefs.showInDock).toggleStyle(.checkbox)
                 Toggle("Open at login", isOn: $prefs.launchAtLogin).toggleStyle(.checkbox)
@@ -154,6 +192,23 @@ struct MonitorRow: View {
                         .help("This monitor doesn't accept hardware commands (common with DisplayLink docks), so it is dimmed in software.")
                 }
                 Spacer()
+                if monitor.hasHardwareControl {
+                    Menu {
+                        Section("Switch input") {
+                            ForEach(MonitorInput.allCases) { input in
+                                Button(input.label) { monitor.setInput(input) }
+                            }
+                        }
+                        Section {
+                            Button("Turn screen off") { monitor.setPower(on: false) }
+                            Button("Wake screen") { monitor.setPower(on: true) }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help("Input and power")
+                }
                 Toggle(isOn: $monitor.linked) { Image(systemName: monitor.linked ? "link" : "link.badge.plus") }
                     .toggleStyle(.button).controlSize(.small)
                     .help(monitor.linked ? "Follows the main slider" : "Adjusted on its own")

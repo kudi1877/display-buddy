@@ -10,6 +10,7 @@ enum VCP: UInt8 {
     case contrast = 0x12
     case volume = 0x62
     case inputSource = 0x60
+    case power = 0xD6
 }
 
 /// One external monitor reachable over DDC on Apple Silicon.

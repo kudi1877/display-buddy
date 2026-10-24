@@ -55,6 +55,20 @@ final class Monitor: ObservableObject, Identifiable {
         writer?.set(code, UInt16(min(max(percent, 0), 100).rounded()))
     }
 
+    /// Switches the monitor to another input (cable). Sent directly so the
+    /// same input can be chosen again after using the monitor's own buttons.
+    func setInput(_ input: MonitorInput) {
+        guard let ddc else { return }
+        DispatchQueue.global(qos: .userInitiated).async { ddc.write(.inputSource, value: input.rawValue) }
+    }
+
+    /// Puts the screen to sleep (DDC power mode "standby"). Pressing the
+    /// monitor's power button, or "Wake screen", turns it back on.
+    func setPower(on: Bool) {
+        guard let ddc else { return }
+        DispatchQueue.global(qos: .userInitiated).async { ddc.write(.power, value: on ? 1 : 4) }
+    }
+
     private func save() {
         UserDefaults.standard.set(["linked": linked, "offset": offset, "own": ownBrightness], forKey: "monitor.\(key)")
     }
@@ -96,6 +110,51 @@ final class CoalescingWriter {
     }
 }
 
+enum MonitorInput: UInt16, CaseIterable, Identifiable {
+    case displayPort1 = 0x0F, displayPort2 = 0x10, hdmi1 = 0x11, hdmi2 = 0x12, usbC = 0x1B
+    var id: UInt16 { rawValue }
+    var label: String {
+        switch self {
+        case .displayPort1: return "DisplayPort 1"
+        case .displayPort2: return "DisplayPort 2"
+        case .hdmi1: return "HDMI 1"
+        case .hdmi2: return "HDMI 2"
+        case .usbC: return "USB-C"
+        }
+    }
+}
+
+enum Preset: String, CaseIterable, Identifiable {
+    case day, reading, movie, night
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var icon: String {
+        switch self {
+        case .day: return "sun.max.fill"
+        case .reading: return "book.fill"
+        case .movie: return "film.fill"
+        case .night: return "moon.stars.fill"
+        }
+    }
+    var brightness: Double {
+        switch self {
+        case .day: return 80
+        case .reading: return 55
+        case .movie: return 35
+        case .night: return -35
+        }
+    }
+    /// nil means "follow the sun".
+    var kelvin: Double? {
+        switch self {
+        case .day: return nil
+        case .reading: return 5200
+        case .movie: return 6200
+        case .night: return 2700
+        }
+    }
+}
+
 enum ColorMode: String, CaseIterable, Identifiable {
     case off, manual, auto
     var id: String { rawValue }
@@ -115,7 +174,12 @@ final class DisplayManager: ObservableObject {
 
     /// Shared brightness, -100...100. Below 0 is "sub-zero" software dimming.
     @Published var brightness: Double {
-        didSet { defaults.set(brightness, forKey: "brightness"); applyAll() }
+        didSet {
+            defaults.set(brightness, forKey: "brightness")
+            if adaptiveBrightness, !applyingAutomatic, !applyingProfile { learnFromManual() }
+            saveProfile()
+            applyAll()
+        }
     }
     @Published var subZeroEnabled: Bool {
         didSet {
@@ -127,10 +191,10 @@ final class DisplayManager: ObservableObject {
         didSet { defaults.set(contrast, forKey: "contrast"); monitors.forEach { $0.setDDC(.contrast, percent: contrast) } }
     }
     @Published var colorMode: ColorMode {
-        didSet { defaults.set(colorMode.rawValue, forKey: "colorMode"); updateKelvin() }
+        didSet { defaults.set(colorMode.rawValue, forKey: "colorMode"); saveProfile(); updateKelvin() }
     }
     @Published var manualKelvin: Double {
-        didSet { defaults.set(manualKelvin, forKey: "manualKelvin"); updateKelvin() }
+        didSet { defaults.set(manualKelvin, forKey: "manualKelvin"); saveProfile(); updateKelvin() }
     }
     @Published var nightKelvin: Double {
         didSet { defaults.set(nightKelvin, forKey: "nightKelvin"); updateKelvin() }
@@ -138,6 +202,18 @@ final class DisplayManager: ObservableObject {
     @Published var warmerWhenDim: Bool {
         didSet { defaults.set(warmerWhenDim, forKey: "warmerWhenDim"); updateKelvin() }
     }
+    /// Brightness follows the sun: bright by day, dim at night.
+    @Published var adaptiveBrightness: Bool {
+        didSet { defaults.set(adaptiveBrightness, forKey: "adaptive"); saveProfile(); updateAdaptive() }
+    }
+    @Published var dayBrightness: Double {
+        didSet { defaults.set(dayBrightness, forKey: "dayBrightness"); saveProfile() }
+    }
+    @Published var nightBrightness: Double {
+        didSet { defaults.set(nightBrightness, forKey: "nightBrightness"); saveProfile() }
+    }
+    /// Name of the current monitor setup, e.g. "3 × DELL P3221D".
+    @Published private(set) var profileName: String = ""
     @Published private(set) var currentKelvin: Double = 6500
     @Published var sunTimes: (sunrise: Date, sunset: Date)? = nil
 
@@ -153,6 +229,9 @@ final class DisplayManager: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var timers: [Timer] = []
     private var monitorBag: [AnyCancellable] = []
+    private var profileKey: String?
+    private var applyingProfile = false
+    private var applyingAutomatic = false
 
     var minBrightness: Double { subZeroEnabled ? -100 : 0 }
 
@@ -161,6 +240,7 @@ final class DisplayManager: ObservableObject {
         defaults.register(defaults: [
             "brightness": 60.0, "subZero": true, "contrast": 70.0, "colorMode": ColorMode.auto.rawValue,
             "manualKelvin": 5000.0, "nightKelvin": 3400.0, "warmerWhenDim": true,
+            "adaptive": false, "dayBrightness": 80.0, "nightBrightness": 30.0,
         ])
         brightness = defaults.double(forKey: "brightness")
         subZeroEnabled = defaults.bool(forKey: "subZero")
@@ -169,6 +249,9 @@ final class DisplayManager: ObservableObject {
         manualKelvin = defaults.double(forKey: "manualKelvin")
         nightKelvin = defaults.double(forKey: "nightKelvin")
         warmerWhenDim = defaults.bool(forKey: "warmerWhenDim")
+        adaptiveBrightness = defaults.bool(forKey: "adaptive")
+        dayBrightness = defaults.double(forKey: "dayBrightness")
+        nightBrightness = defaults.double(forKey: "nightBrightness")
         if defaults.object(forKey: "lat") != nil {
             location = (defaults.double(forKey: "lat"), defaults.double(forKey: "lon"))
         } else {
@@ -190,7 +273,10 @@ final class DisplayManager: ObservableObject {
             })
         }
         // Colour temperature follows the sun; check every minute.
-        timers.append(Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.updateKelvin() })
+        timers.append(Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.updateAdaptive()
+            self?.updateKelvin()
+        })
         // Other apps or macOS can reset colour curves; re-assert them.
         timers.append(Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.applyGammaAll() })
         updateKelvin()
@@ -219,6 +305,8 @@ final class DisplayManager: ObservableObject {
             }
         }
         monitors.forEach { $0.readMax() }
+        loadProfile()
+        updateAdaptive()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.applyAll() }
     }
 
@@ -291,23 +379,99 @@ final class DisplayManager: ObservableObject {
     }
 
     private func sunKelvin(at date: Date) -> Double {
+        guard let p = sunProgress(at: date) else { return 6500 }
+        return nightKelvin + (6500 - nightKelvin) * p
+    }
+
+    /// 0 = night, 1 = day, with a smooth one-hour change around sunrise and sunset.
+    func sunProgress(at date: Date) -> Double? {
         let loc = location
         guard let times = Solar.sunriseSunset(date: date, latitude: loc.latitude, longitude: loc.longitude) else {
-            return 6500
+            return nil
         }
-        sunTimes = times
-        let fade: TimeInterval = 60 * 60 // one-hour smooth transition
+        if sunTimes?.sunrise != times.sunrise { sunTimes = times }
+        let fade: TimeInterval = 60 * 60
         let t = date.timeIntervalSince1970
         let rise = times.sunrise.timeIntervalSince1970, set = times.sunset.timeIntervalSince1970
-        let day = 6500.0, night = nightKelvin
-        if t < rise - fade / 2 || t > set + fade / 2 { return night }
-        if t > rise + fade / 2, t < set - fade / 2 { return day }
-        if t <= rise + fade / 2 {
-            let p = (t - (rise - fade / 2)) / fade
-            return night + (day - night) * p
+        if t < rise - fade / 2 || t > set + fade / 2 { return 0 }
+        if t > rise + fade / 2, t < set - fade / 2 { return 1 }
+        if t <= rise + fade / 2 { return (t - (rise - fade / 2)) / fade }
+        return 1 - (t - (set - fade / 2)) / fade
+    }
+
+    // MARK: Adaptive brightness
+
+    func updateAdaptive() {
+        guard adaptiveBrightness, let p = sunProgress(at: Date()) else { return }
+        let target = min(max(nightBrightness + (dayBrightness - nightBrightness) * p, minBrightness), 100)
+        guard abs(target - brightness) >= 0.5 else { return }
+        applyingAutomatic = true
+        brightness = target
+        applyingAutomatic = false
+    }
+
+    /// When you change brightness by hand, remember it as your preference for
+    /// this time of day, so the automatic curve passes through your choice.
+    private func learnFromManual() {
+        guard let p = sunProgress(at: Date()) else { return }
+        if p >= 0.5 {
+            dayBrightness = min(max((brightness - nightBrightness * (1 - p)) / p, minBrightness), 100)
+        } else {
+            nightBrightness = min(max((brightness - dayBrightness * p) / (1 - p), minBrightness), 100)
         }
-        let p = (t - (set - fade / 2)) / fade
-        return day + (night - day) * p
+    }
+
+    // MARK: Presets and shortcuts
+
+    func apply(preset: Preset) {
+        adaptiveBrightness = false
+        brightness = min(max(preset.brightness, minBrightness), 100)
+        if let k = preset.kelvin {
+            manualKelvin = k
+            colorMode = .manual
+        } else {
+            colorMode = .auto
+        }
+    }
+
+    func shiftKelvin(by delta: Double) {
+        if colorMode != .manual {
+            manualKelvin = (currentKelvin / 100).rounded() * 100
+            colorMode = .manual
+        }
+        manualKelvin = min(max(manualKelvin + delta, 1900), 6500)
+    }
+
+    // MARK: Profiles (home / work)
+
+    /// Each set of connected monitors is its own profile, so the home and work
+    /// desks keep their own brightness, colour and schedule.
+    private func loadProfile() {
+        guard !monitors.isEmpty else { profileKey = nil; profileName = ""; return }
+        let key = monitors.map(\.key).sorted().joined(separator: "|")
+        let names = Dictionary(grouping: monitors, by: \.name)
+            .map { $0.value.count > 1 ? "\($0.value.count) × \($0.key)" : $0.key }
+            .sorted()
+        profileName = names.joined(separator: " + ")
+        guard key != profileKey else { return }
+        profileKey = key
+        guard let p = defaults.dictionary(forKey: "profile.\(key)") else { saveProfile(); return }
+        applyingProfile = true
+        if let v = p["adaptive"] as? Bool { adaptiveBrightness = v }
+        if let v = p["day"] as? Double { dayBrightness = v }
+        if let v = p["night"] as? Double { nightBrightness = v }
+        if let v = p["manualKelvin"] as? Double { manualKelvin = v }
+        if let v = p["colorMode"] as? String, let mode = ColorMode(rawValue: v) { colorMode = mode }
+        if let v = p["brightness"] as? Double { brightness = v }
+        applyingProfile = false
+    }
+
+    private func saveProfile() {
+        guard let key = profileKey, !applyingProfile else { return }
+        defaults.set([
+            "brightness": brightness, "adaptive": adaptiveBrightness, "day": dayBrightness,
+            "night": nightBrightness, "manualKelvin": manualKelvin, "colorMode": colorMode.rawValue,
+        ], forKey: "profile.\(key)")
     }
 }
 
