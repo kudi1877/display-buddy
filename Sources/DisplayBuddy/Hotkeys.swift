@@ -43,7 +43,7 @@ final class Hotkeys {
         unregister()
         let manager = DisplayManager.shared
         let mods = UInt32(controlKey | optionKey)
-        let showOSD = { OSD.shared.show(brightness: manager.brightness, kelvin: manager.currentKelvin) }
+        let showOSD = { OSD.shared.show(brightness: manager.shownBrightness, kelvin: manager.currentKelvin) }
         var bindings: [(Int, () -> Void)] = [
             (kVK_UpArrow, { manager.step(by: 6.25); showOSD() }),
             (kVK_DownArrow, { manager.step(by: -6.25); showOSD() }),

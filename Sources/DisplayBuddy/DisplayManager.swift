@@ -212,6 +212,13 @@ final class DisplayManager: ObservableObject {
     @Published var nightBrightness: Double {
         didSet { defaults.set(nightBrightness, forKey: "nightBrightness"); saveProfile() }
     }
+    /// Per-app brightness for the app in front (see AppRules); replaces the
+    /// shared brightness while set, without changing it.
+    @Published var appOverride: Double? {
+        didSet { applyAll() }
+    }
+    /// Brightness the linked monitors are showing right now.
+    var shownBrightness: Double { appOverride ?? brightness }
     /// Name of the current monitor setup, e.g. "3 × DELL P3221D".
     @Published private(set) var profileName: String = ""
     @Published private(set) var currentKelvin: Double = 6500
@@ -313,11 +320,12 @@ final class DisplayManager: ObservableObject {
     // MARK: Brightness
 
     func effectiveBrightness(_ m: Monitor) -> Double {
-        let value = m.linked ? brightness + m.offset : m.ownBrightness
+        let value = m.linked ? shownBrightness + m.offset : m.ownBrightness
         return min(max(value, minBrightness), 100)
     }
 
     func step(by delta: Double) {
+        if AppRules.shared.stepActive(by: delta) { return }
         brightness = min(max(brightness + delta, minBrightness), 100)
     }
 
@@ -369,9 +377,9 @@ final class DisplayManager: ObservableObject {
             target = sunKelvin(at: Date())
         }
         var kelvin = target
-        if colorMode != .off, warmerWhenDim, brightness < 30 {
+        if colorMode != .off, warmerWhenDim, shownBrightness < 30 {
             // Gently warm the picture further as you dim, like Lunar Pro.
-            let t = (30 - max(brightness, -100)) / 130
+            let t = (30 - max(shownBrightness, -100)) / 130
             kelvin = target - (target - min(nightKelvin, target)) * t * 0.5
         }
         currentKelvin = kelvin

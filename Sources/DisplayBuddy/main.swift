@@ -28,11 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let manager = DisplayManager.shared
         manager.start()
+        AppRules.shared.start()
 
         KeyboardTap.shared.onBrightness = { up, fine in
             let step = fine ? 1.5 : 6.25 // 16 steps across 0...100, like macOS
             manager.step(by: up ? step : -step)
-            OSD.shared.show(brightness: manager.brightness, kelvin: manager.currentKelvin)
+            OSD.shared.show(brightness: manager.shownBrightness, kelvin: manager.currentKelvin)
         }
         Hotkeys.shared.start()
         if !KeyboardTap.shared.start() {

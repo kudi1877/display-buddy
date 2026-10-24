@@ -4,8 +4,10 @@ import SwiftUI
 struct PopoverView: View {
     @ObservedObject var manager = DisplayManager.shared
     @ObservedObject var prefs = AppPrefs.shared
+    @ObservedObject var appRules = AppRules.shared
     @State private var keysActive = KeyboardTap.shared.isTrusted
     @State private var showMonitors = true
+    @State private var showApps = false
     @State private var hotkeysOn = Hotkeys.shared.isEnabled
 
     var body: some View {
@@ -14,6 +16,7 @@ struct PopoverView: View {
             masterCard
             presetsRow
             if !manager.monitors.isEmpty { monitorsCard }
+            appsCard
             colorCard
             footer
         }
@@ -57,6 +60,10 @@ struct PopoverView: View {
                 Slider(value: $manager.brightness, in: manager.minBrightness ... 100)
                     .tint(manager.brightness < 0 ? .indigo : .orange)
                 Image(systemName: "sun.max.fill").foregroundStyle(.orange)
+            }
+            if let rule = appRules.activeRule {
+                Label("\(rule.name) is in front: \(Int(rule.brightness))% (per-app)", systemImage: "app.badge")
+                    .font(.system(size: 10)).foregroundStyle(.teal)
             }
             Toggle(isOn: $manager.adaptiveBrightness) {
                 Text("Follow the sun").font(.system(size: 12))
@@ -105,6 +112,33 @@ struct PopoverView: View {
                 .padding(.top, 6)
             } label: {
                 Label("Monitors", systemImage: "display.2")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var appsCard: some View {
+        Card {
+            DisclosureGroup(isExpanded: $showApps) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle(isOn: $appRules.enabled) {
+                        Text("Per-app brightness").font(.system(size: 12))
+                        Text("Switches brightness when these apps are in front").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    .toggleStyle(.switch).controlSize(.mini)
+                    ForEach(appRules.rules) { rule in AppRuleRow(rule: rule) }
+                    HStack {
+                        if let last = appRules.lastApp, !appRules.hasRule(for: last.bundleID) {
+                            Button("Add \(last.name)") { appRules.add(bundleID: last.bundleID, name: last.name) }
+                                .help("Uses the brightness on screen now; adjust it below")
+                        }
+                        Button("Choose app…") { appRules.addFromFinder() }
+                    }
+                    .controlSize(.small)
+                }
+                .padding(.top, 6)
+            } label: {
+                Label(appRules.rules.isEmpty ? "Apps" : "Apps (\(appRules.rules.count))", systemImage: "square.grid.2x2")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
             }
         }
@@ -199,6 +233,30 @@ struct MonitorRow: View {
                                 Button(input.label) { monitor.setInput(input) }
                             }
                         }
+                        Menu("Resolution") {
+                            let current = DisplayLayout.current(for: monitor.id)
+                            ForEach(DisplayLayout.resolutions(for: monitor.id)) { r in
+                                Button {
+                                    DisplayLayout.set(r, on: monitor.id)
+                                } label: {
+                                    let title = r.hiDPI ? "\(r.label)  (HiDPI)" : r.label
+                                    if r == current { Label(title, systemImage: "checkmark") } else { Text(title) }
+                                }
+                            }
+                        }
+                        if DisplayLayout.canRotate(monitor.id) {
+                            Menu("Rotation") {
+                                let current = DisplayLayout.rotation(of: monitor.id)
+                                ForEach(DisplayLayout.rotations, id: \.self) { deg in
+                                    Button {
+                                        DisplayLayout.rotate(monitor.id, to: deg)
+                                    } label: {
+                                        let title = deg == 0 ? "Standard (landscape)" : "\(deg)°" + (deg == 90 || deg == 270 ? " (portrait)" : "")
+                                        if deg == current { Label(title, systemImage: "checkmark") } else { Text(title) }
+                                    }
+                                }
+                            }
+                        }
                         Section {
                             Button("Turn screen off") { monitor.setPower(on: false) }
                             Button("Wake screen") { monitor.setPower(on: true) }
@@ -207,7 +265,7 @@ struct MonitorRow: View {
                         Image(systemName: "ellipsis.circle")
                     }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .help("Input and power")
+                    .help("Resolution, rotation, input and power")
                 }
                 Toggle(isOn: $monitor.linked) { Image(systemName: monitor.linked ? "link" : "link.badge.plus") }
                     .toggleStyle(.button).controlSize(.small)
@@ -228,6 +286,26 @@ struct MonitorRow: View {
                         .foregroundStyle(.secondary).frame(width: 28)
                 }
             }
+        }
+    }
+}
+
+struct AppRuleRow: View {
+    let rule: AppRules.Rule
+    @ObservedObject var rules = AppRules.shared
+    @ObservedObject var manager = DisplayManager.shared
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let icon = AppRules.icon(for: rule.bundleID) {
+                Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+            }
+            Text(rule.name).font(.system(size: 11)).lineLimit(1).frame(width: 78, alignment: .leading)
+            Slider(value: Binding(get: { rule.brightness }, set: { rules.setBrightness($0, for: rule.bundleID) }),
+                   in: manager.minBrightness ... 100).controlSize(.mini)
+            Text("\(Int(rule.brightness))").font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary).frame(width: 26)
+            Button { rules.remove(rule) } label: { Image(systemName: "xmark.circle.fill") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Remove")
         }
     }
 }

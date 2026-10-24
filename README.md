@@ -10,12 +10,15 @@ A free macOS menu bar app to control external monitors: synced brightness, Apple
 - Sub-zero dimming below the monitor's hardware minimum
 - Colour temperature: manual, or follows sunrise/sunset; warmer when dimmed
 - Contrast control
+- Per-app brightness: chosen apps get their own brightness while they are in front
+- Resolution and rotation quick-switch per monitor (monitor menu ⋯)
 - Works with Bartender / Ice / Hidden Bar; optional Dock icon; open at login
 - Settings remembered per monitor (home and work setups)
 
 ## How it works
 - **Hardware brightness:** DDC/CI over the monitor cable (Apple Silicon `IOAVService`), the approach used by [MonitorControl](https://github.com/MonitorControl/MonitorControl) and [m1ddc](https://github.com/waydabber/m1ddc).
 - **Sub-zero and colour temperature:** display gamma tables.
+- **Rotation:** Apple's private MonitorPanel framework (what System Settings uses), loaded at runtime; resolution uses the public CoreGraphics display-mode API.
 - **Keys:** a CoreGraphics event tap (needs Accessibility permission).
 
 ## Build
