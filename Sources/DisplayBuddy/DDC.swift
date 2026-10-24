@@ -14,12 +14,12 @@ enum VCP: UInt8 {
 
 /// One external monitor reachable over DDC on Apple Silicon.
 final class DDCService {
-    let service: IOAVServiceRef
+    let service: AnyObject
     private let chipAddress: UInt32 = 0x37
     private let dataAddress: UInt32 = 0x51
     private let lock = NSLock()
 
-    init(service: IOAVServiceRef) {
+    init(service: AnyObject) {
         self.service = service
     }
 
@@ -77,7 +77,7 @@ struct RegistryDisplay {
     var vendorID: UInt32?
     var productID: UInt32?
     var serial: UInt32?
-    var service: IOAVServiceRef
+    var service: AnyObject
 }
 
 enum DDCDiscovery {
