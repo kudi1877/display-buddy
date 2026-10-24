@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Display Buddy.app
+      - name: Build Display Buddy Free.app
         env:
           VERSION: 0.1.${{ github.run_number }}
           BUILD: ${{ github.run_number }}
@@ -32,6 +32,6 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest build/DisplayBuddy.zip \
-            --title "Display Buddy 0.1.${{ github.run_number }}" \
+            --title "Display Buddy Free 0.1.${{ github.run_number }}" \
             --notes "Download DisplayBuddy.zip below, then follow INSTALL.md." \
             --target "${{ github.sha }}"

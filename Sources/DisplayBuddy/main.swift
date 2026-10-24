@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.autosaveName = "DisplayBuddyStatusItem"
         if let button = statusItem.button {
             button.image = MenuBarIcon.make()
-            button.toolTip = "Display Buddy"
+            button.toolTip = "Display Buddy Free"
             button.action = #selector(togglePopover(_:))
             button.target = self
         }

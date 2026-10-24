@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Display Buddy</string>
-    <key>CFBundleDisplayName</key><string>Display Buddy</string>
+    <key>CFBundleName</key><string>Display Buddy Free</string>
+    <key>CFBundleDisplayName</key><string>Display Buddy Free</string>
     <key>CFBundleIdentifier</key><string>com.kudi1877.displaybuddy</string>
-    <key>CFBundleExecutable</key><string>DisplayBuddy</string>
+    <key>CFBundleExecutable</key><string>DisplayBuddyFree</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>__VERSION__</string>
