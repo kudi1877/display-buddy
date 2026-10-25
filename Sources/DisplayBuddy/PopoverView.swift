@@ -5,22 +5,72 @@ struct PopoverView: View {
     @ObservedObject var manager = DisplayManager.shared
     @ObservedObject var prefs = AppPrefs.shared
     @ObservedObject var appRules = AppRules.shared
+    @ObservedObject var presence = Presence.shared
     @State private var keysActive = KeyboardTap.shared.isTrusted
     @State private var showMonitors = true
     @State private var showApps = false
     @State private var hotkeysOn = Hotkeys.shared.isEnabled
+    @ObservedObject private var layout = PopoverLayout.shared
+    @State private var cardsHeight: CGFloat = 600
+    @State private var footerHeight: CGFloat = 120
+    @State private var topHeight: CGFloat = 80
+    @AppStorage("popover.tab") private var tab: PopoverTab = .brightness
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            masterCard
-            presetsRow
-            if !manager.monitors.isEmpty { monitorsCard }
-            appsCard
-            colorCard
-            footer
+    enum PopoverTab: String, CaseIterable, Identifiable {
+        case brightness, keepAwake, presentation
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .brightness: return "Brightness"
+            case .keepAwake: return "Keep Awake"
+            case .presentation: return "Presentation"
+            }
         }
-        .padding(16)
+    }
+
+    /// Without the Keep Awake & Presentation module there is only one section.
+    private var shownTab: PopoverTab { presence.enabled ? tab : .brightness }
+
+    /// Header and tabs on top, the selected section in the middle (scrolls when
+    /// it doesn't fit the screen), and the footer pinned at the bottom.
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                if presence.enabled {
+                    Picker("", selection: $tab) {
+                        ForEach(PopoverTab.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                }
+            }
+            .padding([.horizontal, .top], 16)
+            .padding(.bottom, 12)
+            .background(HeightReader(height: $topHeight))
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 14) {
+                    switch shownTab {
+                    case .brightness:
+                        masterCard
+                        presetsRow
+                        if !manager.monitors.isEmpty { monitorsCard }
+                        appsCard
+                        colorCard
+                    case .keepAwake:
+                        KeepAwakeTab()
+                    case .presentation:
+                        PresentationTab()
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+                .background(HeightReader(height: $cardsHeight))
+            }
+            .frame(height: min(cardsHeight, max(layout.maxHeight - footerHeight - topHeight, 200)))
+            footer
+                .padding([.horizontal, .bottom], 16)
+                .background(HeightReader(height: $footerHeight))
+        }
         .frame(width: 340)
         .onAppear { keysActive = KeyboardTap.shared.isTrusted }
     }
@@ -51,18 +101,18 @@ struct PopoverView: View {
                 Label("Brightness", systemImage: "sun.max.fill").labelStyle(.titleAndIcon)
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
-                Text(manager.brightness < 0 ? "Sub-zero \(Int(manager.brightness))" : "\(Int(manager.brightness))%")
+                Text(shown < 0 ? "Sub-zero \(Int(shown))" : "\(Int(shown))%")
                     .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(manager.brightness < 0 ? Color.indigo : Color.primary)
+                    .foregroundStyle(shown < 0 ? Color.indigo : Color.primary)
             }
             HStack(spacing: 8) {
                 Image(systemName: manager.subZeroEnabled ? "moon.fill" : "sun.min").foregroundStyle(.secondary)
-                Slider(value: $manager.brightness, in: manager.minBrightness ... 100)
-                    .tint(manager.brightness < 0 ? .indigo : .orange)
+                Slider(value: brightnessBinding, in: manager.minBrightness ... 100)
+                    .tint(shown < 0 ? .indigo : .orange)
                 Image(systemName: "sun.max.fill").foregroundStyle(.orange)
             }
             if let rule = appRules.activeRule {
-                Label("\(rule.name) is in front: \(Int(rule.brightness))% (per-app)", systemImage: "app.badge")
+                Label("Setting \(rule.name)'s own brightness (per-app). Other apps: \(Int(manager.brightness))%", systemImage: "app.badge")
                     .font(.system(size: 10)).foregroundStyle(.teal)
             }
             Toggle(isOn: $manager.adaptiveBrightness) {
@@ -79,6 +129,22 @@ struct PopoverView: View {
             }
             .toggleStyle(.switch).controlSize(.mini)
         }
+    }
+
+    /// What the monitors show now: the per-app brightness while an app with a rule is in front.
+    private var shown: Double { appRules.activeRule?.brightness ?? manager.brightness }
+
+    /// While an app with its own brightness is in front, the slider adjusts that
+    /// app's brightness (like the brightness keys do); otherwise the shared one.
+    /// Before, it moved the hidden shared value, so the screens didn't change.
+    private var brightnessBinding: Binding<Double> {
+        Binding(get: { shown }, set: { value in
+            if let rule = appRules.activeRule {
+                appRules.setBrightness(value, for: rule.bundleID)
+            } else {
+                manager.brightness = value
+            }
+        })
     }
 
     private var presetsRow: some View {
@@ -199,6 +265,11 @@ struct PopoverView: View {
                 Text("⌃⌥↑↓ brightness · ⌃⌥←→ warmth · ⌃⌥1–4 presets")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
+            Toggle(isOn: $presence.enabled) {
+                Text("Keep Awake & Presentation mode").font(.system(size: 11))
+            }
+            .toggleStyle(.checkbox)
+            .help("Keep the Mac awake, and make the screens presentation-safe in one click")
             HStack {
                 Toggle("Dock icon", isOn: $prefs.showInDock).toggleStyle(.checkbox)
                 Toggle("Open at login", isOn: $prefs.launchAtLogin).toggleStyle(.checkbox)
@@ -332,6 +403,18 @@ struct KelvinBadge: View {
         }
         .padding(.horizontal, 7).padding(.vertical, 3)
         .background(Color.primary.opacity(0.07), in: Capsule())
+    }
+}
+
+/// Reports a view's height, so the popover can size its scroll area to the content.
+struct HeightReader: View {
+    @Binding var height: CGFloat
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { height = proxy.size.height }
+                .onChange(of: proxy.size.height) { height = $0 }
+        }
     }
 }
 
