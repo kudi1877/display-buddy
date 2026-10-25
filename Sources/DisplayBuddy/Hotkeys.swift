@@ -5,6 +5,7 @@ import Carbon.HIToolbox
 ///   ⌃⌥↑ / ⌃⌥↓   brightness up / down
 ///   ⌃⌥← / ⌃⌥→   warmer / cooler
 ///   ⌃⌥1…4       presets Day, Reading, Movie, Night
+///   ⌃⌥K / ⌃⌥P   Keep Awake / Presentation Mode (when that module is on)
 final class Hotkeys {
     static let shared = Hotkeys()
 
@@ -22,6 +23,11 @@ final class Hotkeys {
 
     func start() {
         installHandler()
+        if isEnabled { register() }
+    }
+
+    /// Re-registers after a module adds or removes its shortcuts.
+    func reload() {
         if isEnabled { register() }
     }
 
@@ -54,6 +60,7 @@ final class Hotkeys {
         for (key, preset) in zip(numberKeys, Preset.allCases) {
             bindings.append((key, { manager.apply(preset: preset); showOSD() }))
         }
+        bindings += MainActor.assumeIsolated { Presence.shared.hotkeyBindings }
         for (index, binding) in bindings.enumerated() {
             let id = UInt32(index + 1)
             var ref: EventHotKeyRef?

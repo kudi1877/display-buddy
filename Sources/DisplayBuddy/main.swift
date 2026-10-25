@@ -25,10 +25,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: PopoverView())
+        NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: popover, queue: .main) { [weak self] _ in
+            self?.popoverAnchorWindow?.orderOut(nil)
+        }
 
         let manager = DisplayManager.shared
         manager.start()
         AppRules.shared.start()
+
+        // Keep Awake + Presentation Mode (Presence/). Started after the display
+        // manager so a crash-left presentation can restore display settings.
+        Presence.shared.onActiveChange = { [weak self] active in
+            self?.statusItem.button?.image = MenuBarIcon.make(active: active)
+        }
+        Presence.shared.start()
 
         KeyboardTap.shared.onBrightness = { up, fine in
             let step = fine ? 1.5 : 6.25 // 16 steps across 0...100, like macOS
@@ -60,7 +70,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard PresentationMode.shared.isOn else { return .terminateNow }
+        // Put presentation changes back before quitting.
+        Presence.shared.prepareToQuit { sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        Presence.shared.shutdown()
         DisplayManager.shared.stop()
     }
 
@@ -71,15 +89,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPopover() {
         guard let button = statusItem.button else { return }
         NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+        let (view, rect, screen) = popoverAnchor(for: button)
+        // Leave room for the arrow and a small gap at the bottom; the content scrolls beyond that.
+        PopoverLayout.shared.maxHeight = screen.visibleFrame.height - 40
+        popoverAnchorTarget = (view, rect)
+        popover.show(relativeTo: rect, of: view, preferredEdge: .minY)
+        guard let window = popover.contentViewController?.view.window else { return }
+        window.makeKey()
+        // SwiftUI settles the content height after the popover opens, and
+        // AppKit grows the window upwards, past the top of the screen. Re-anchor
+        // after every resize so it always hangs below the menu bar.
+        if popoverResizeObserver == nil {
+            popoverResizeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification, object: window, queue: .main
+            ) { [weak self] _ in self?.reanchorPopover() }
+        }
+        DispatchQueue.main.async { [weak self] in self?.reanchorPopover() }
     }
+
+    private var popoverAnchorTarget: (NSView, NSRect)?
+    private var popoverResizeObserver: NSObjectProtocol?
+    private var reanchoring = false
+
+    private func reanchorPopover() {
+        guard popover.isShown, !reanchoring, let (view, rect) = popoverAnchorTarget,
+              let window = popover.contentViewController?.view.window,
+              let screen = window.screen ?? view.window?.screen else { return }
+        guard !screen.frame.contains(window.frame) else { return }
+        reanchoring = true
+        popover.show(relativeTo: rect, of: view, preferredEdge: .minY)
+        reanchoring = false
+    }
+
+    /// When the menu bar is full, macOS moves status items into a hidden
+    /// overflow off-screen (and Bartender/Ice can hide them too). Anchoring to
+    /// such a button opens the popover partly outside the screen, so in that
+    /// case anchor it under the menu bar of the screen with the mouse instead.
+    private func popoverAnchor(for button: NSStatusBarButton) -> (NSView, NSRect, NSScreen) {
+        if let window = button.window {
+            let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(frame) }) {
+                return (button, button.bounds, screen)
+            }
+        }
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens[0]
+        let visible = screen.visibleFrame
+        let x = min(max(mouse.x, visible.minX + 190), visible.maxX - 190)
+        let anchor = popoverAnchorWindow ?? {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1), styleMask: .borderless, backing: .buffered, defer: false)
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.ignoresMouseEvents = true
+            w.level = .statusBar
+            w.isReleasedWhenClosed = false
+            w.collectionBehavior = [.canJoinAllSpaces, .transient]
+            popoverAnchorWindow = w
+            return w
+        }()
+        anchor.setFrame(NSRect(x: x, y: visible.maxY - 1, width: 1, height: 1), display: false)
+        anchor.orderFrontRegardless()
+        let view = anchor.contentView ?? NSView()
+        return (view, view.bounds, screen)
+    }
+
+    private var popoverAnchorWindow: NSWindow?
+}
+
+/// Largest height the popover may use on the screen it opens on.
+final class PopoverLayout: ObservableObject {
+    static let shared = PopoverLayout()
+    @Published var maxHeight: CGFloat = 800
 }
 
 /// Menu bar icon: a small monitor with a rising sun, drawn as a "template"
 /// image so macOS colours it correctly in light and dark menu bars.
 enum MenuBarIcon {
-    static func make() -> NSImage {
+    /// `active` adds a small dot while Keep Awake or Presentation Mode is on.
+    static func make(active: Bool = false) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             NSColor.black.setStroke()
             NSColor.black.setFill()
@@ -106,6 +193,9 @@ enum MenuBarIcon {
                 ray.lineWidth = 1.2
                 ray.lineCapStyle = .round
                 ray.stroke()
+            }
+            if active {
+                NSBezierPath(ovalIn: NSRect(x: 13.5, y: 0, width: 4.5, height: 4.5)).fill()
             }
             return true
         }
