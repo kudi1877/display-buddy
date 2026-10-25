@@ -34,8 +34,22 @@ Click the menu bar icon:
 
 If you use Bartender or Ice, the Display Buddy icon appears in their list like any other menu bar app.
 
+## 5. Keep Awake and Presentation mode (optional)
+Tick **Keep Awake & Presentation mode** at the bottom of the menu. The menu gets three tabs: **Brightness**, **Keep Awake** and **Presentation**.
+- **Keep Awake** keeps your Mac awake for the time you pick (⌃⌥K). Choose *Keep display on*, or *Display may sleep* to keep only the Mac awake. You can also list apps (e.g. Zoom, Keynote) that keep the Mac awake while they run. A small dot on the menu bar icon shows it is on.
+- **Presentation** (⌃⌥P) hides desktop icons, turns on Do Not Disturb, auto-hides the Dock and menu bar and keeps the screens on. Each option can be switched on or off in the tab. Turning presentation mode off puts everything back.
+- **Share area** (Presentation tab) puts an orange landscape frame on a vertical screen. In Teams, Zoom, Slack, Discord, Meet or Whereby choose *Share → Window → Display Buddy — Shared area* to show only what is inside the frame. The first time, allow Display Buddy Free under **System Settings → Privacy & Security → Screen & System Audio Recording**.
+
+The first time presentation mode hides the Dock, macOS asks whether Display Buddy Free may control **System Events**. Click **OK**. If you clicked *Don't Allow*, open **System Settings → Privacy & Security → Automation** and switch on System Events under Display Buddy Free.
+
+**Do Not Disturb needs two shortcuts** (macOS doesn't let apps switch Focus directly):
+1. Open the **Shortcuts** app and click **+**.
+2. Add the **Set Focus** action, choose **Do Not Disturb**, **Turn On**, and name the shortcut **Display Buddy Focus On**.
+3. Make a second shortcut the same way with **Turn Off**, named **Display Buddy Focus Off**.
+4. In Display Buddy's Presence settings, click **Check shortcuts**.
+
 ## After an update
-When you install a newer version, macOS may forget the Accessibility permission. Open **System Settings → Privacy & Security → Accessibility**, remove Display Buddy Free with the **−** button, and switch it on again.
+When you install a newer version, macOS may forget the Accessibility permission. Open **System Settings → Privacy & Security → Accessibility**, remove Display Buddy Free with the **−** button, and switch it on again. It may also ask again for **Automation** (System Events) the next time presentation mode runs.
 
 ## If a monitor shows "software only"
 That monitor doesn't accept brightness commands through the cable (common with DisplayLink docks and some TVs). Display Buddy still dims it in software, but it can't change the real backlight.

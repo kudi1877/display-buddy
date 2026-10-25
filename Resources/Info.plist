@@ -14,6 +14,7 @@
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSAppleEventsUsageDescription</key><string>Presentation mode uses System Events to auto-hide the Dock and menu bar, and puts them back afterwards.</string>
     <key>NSHumanReadableCopyright</key><string>Free and open source. MIT License.</string>
 </dict>
 </plist>
